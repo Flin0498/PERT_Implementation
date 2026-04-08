@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PERT 计划评审分析</title>
+    <link rel="stylesheet" href="styles.css" />
+    <!-- SheetJS 本地副本，全程可离线打开 -->
+    <script src="xlsx.full.min.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <header class="hero">
+        <h1>PERT 计划评审分析</h1>
+        <p>
+          Three-point estimates to compute expected time/variance, ES/EF, LS/LF, slack and critical path, plus completion probability.（三点估计计算期望工期/方差、ES/EF、LS/LF、时差与关键路径，并提供完工概率）
+        </p>
+      </header>
+
+      <div class="panel">
+        <h2>Data Source（数据来源）</h2>
+        <div class="source-row source-radios">
+          <label><input type="radio" name="src" value="manual" checked /> Manual Form（手动填表）</label>
+          <label><input type="radio" name="src" value="sheet" /> Upload Spreadsheet（上传表格 .xlsx / .xls / .csv）</label>
+        </div>
+
+        <div id="block-sheet" class="source-block" style="display: none">
+          <p class="upload-line">
+            <input type="file" id="sheetFile" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" />
+            <span id="sheetStatus" class="sheet-status"></span>
+          </p>
+          <p class="hint">
+            Header row must be: Activity Code, Activity Description, Normal Cost (BDT), Immediate Predecessors, Optimistic Estimate, Most Likely Estimate, Pessimistic Estimate. Data starts from the next row.（表头必须为以上英文列名；数据从表头下一行开始）
+          </p>
+        </div>
+
+        <div id="block-manual" class="source-block">
+          <div class="manual-toolbar">
+            <button type="button" class="btn primary" id="addRow">＋ Add Row（增加一行）</button>
+            <span class="hint" style="margin: 0">English input only.（只接受英文输入法）&nbsp; Code is a single letter; use <code>-</code> if none.（活动代码为单字母；无紧前可填 <code>-</code>）</span>
+          </div>
+          <p class="pred-examples" aria-label="紧前工序多种写法等价">
+            <span class="pred-examples-title">Equivalent predecessor formats (same parsing result).（紧前工序多个时写法等价，解析结果相同）</span>
+            <code class="pred-ex">E,G</code>
+            <span class="pred-examples-dot">·</span>
+            <code class="pred-ex">E G</code>
+            <span class="pred-examples-dot">·</span>
+            <code class="pred-ex">E, G</code>
+            <span class="pred-examples-tail">All mean predecessors are E and G.（均表示紧前为 E 与 G）</span>
+          </p>
+          <div class="form-table-wrap">
+            <table class="form-table" id="manualTable">
+              <thead>
+                <tr>
+                  <th class="col-code">Activity Code</th>
+                  <th class="col-desc">Activity Description</th>
+                  <th class="col-cost">Normal Cost (BDT)</th>
+                  <th class="col-pred">Immediate Predecessors</th>
+                  <th class="col-o">Optimistic Estimate</th>
+                  <th class="col-m">Most Likely Estimate</th>
+                  <th class="col-p">Pessimistic Estimate</th>
+                  <th class="col-act"></th>
+                </tr>
+              </thead>
+              <tbody id="manualBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <p class="hint">All calculations run locally in your browser.（计算在浏览器本地完成）</p>
+        <div id="dataWarning" class="data-warning" style="display: none"></div>
+        <button type="button" class="btn primary" id="recalc">Calculate（计算）</button>
+      </div>
+
+      <div class="stats-bar" id="statsBar"></div>
+
+      <nav class="tabs" role="tablist" aria-label="报告分区"></nav>
+
+      <section class="view active" id="view-overview" role="tabpanel"></section>
+      <section class="view" id="view-activities" role="tabpanel"></section>
+      <section class="view" id="view-times" role="tabpanel"></section>
+      <section class="view" id="view-schedule" role="tabpanel"></section>
+      <section class="view" id="view-critical" role="tabpanel"></section>
+      <section class="view" id="view-stats" role="tabpanel"></section>
+      <section class="view" id="view-prob" role="tabpanel"></section>
+      <section class="view" id="view-network" role="tabpanel"></section>
+
+      <footer class="note">
+        Upload <code>.xlsx</code>/<code>.xls</code>/<code>.csv</code> or fill the form. Open <code>index.html</code> offline to use.（支持上传表格或手动填表；离线打开 <code>index.html</code> 即可使用）
+      </footer>
+    </div>
+
+    <script src="pert.js"></script>
+    <script>
+      (function () {
+        const P = window.PERT;
+        const tabsConfig = [
+          { id: "overview", label: "Overview（总览）" },
+          { id: "activities", label: "Activities（工序信息）" },
+          { id: "times", label: "Estimates（时间估计）" },
+          { id: "schedule", label: "Schedule（进度分析）" },
+          { id: "critical", label: "Critical Path（关键路径）" },
+          { id: "stats", label: "Statistics（统计分析）" },
+          { id: "prob", label: "Probability（完工概率）" },
+          { id: "network", label: "Network（网络依赖）" },
+        ];
+
+        let activities = [];
+        let uploadedActivities = null;
+        const nav = document.querySelector(".tabs");
+
+        function showWarning(msg) {
+          const el = document.getElementById("dataWarning");
+          if (!msg) {
+            el.style.display = "none";
+            el.textContent = "";
+            return;
+          }
+          el.style.display = "block";
+          el.textContent = msg;
+        }
+
+        function syncSourceBlocks() {
+          const src = document.querySelector('input[name="src"]:checked').value;
+          document.getElementById("block-sheet").style.display = src === "sheet" ? "block" : "none";
+          document.getElementById("block-manual").style.display = src === "manual" ? "block" : "none";
+        }
+
+        function esc(s) {
+          const d = document.createElement("div");
+          d.textContent = s == null ? "" : s;
+          return d.innerHTML;
+        }
+
+        function readManualRows() {
+          const body = document.getElementById("manualBody");
+          const out = [];
+          body.querySelectorAll("tr").forEach((tr) => {
+            const inp = tr.querySelectorAll("input");
+            if (inp.length < 7) return;
+            const act = P.activityFromSeven(inp[0].value, inp[1].value, inp[2].value, inp[3].value, inp[4].value, inp[5].value, inp[6].value);
+            if (act) out.push(act);
+          });
+          return out;
+        }
+
+        function addManualRow(values) {
+          const body = document.getElementById("manualBody");
+          const tr = document.createElement("tr");
+          const v = values || ["", "", "", "-", "", "", ""];
+          const placeholders = ["A", "描述", "0", "- 或 A,B", "O", "M", "P"];
+          const classes = ["inp-code", "inp-desc", "inp-num", "inp-pred", "inp-num", "inp-num", "inp-num"];
+          for (let i = 0; i < 7; i++) {
+            const td = document.createElement("td");
+            const input = document.createElement("input");
+            input.type = "text";
+            input.className = classes[i];
+            input.placeholder = placeholders[i];
+            input.value = v[i] != null ? v[i] : "";
+            if (i === 0) input.maxLength = 1;
+            if (i === 2) input.setAttribute("inputmode", "numeric");
+            else if (i >= 4) input.setAttribute("inputmode", "decimal");
+            td.appendChild(input);
+            tr.appendChild(td);
+          }
+          const tdAct = document.createElement("td");
+          const del = document.createElement("button");
+          del.type = "button";
+          del.className = "btn btn-icon row-del";
+          del.title = "删除本行";
+          del.textContent = "−";
+          del.addEventListener("click", function () {
+            tr.remove();
+            if (!body.querySelector("tr")) addManualRow();
+          });
+          tdAct.appendChild(del);
+          tr.appendChild(tdAct);
+          body.appendChild(tr);
+        }
+
+        function getSourceActivities() {
+          const src = document.querySelector('input[name="src"]:checked').value;
+          showWarning("");
+          if (src === "sheet") {
+            if (uploadedActivities && uploadedActivities.length) return uploadedActivities.slice();
+            showWarning("Please upload a spreadsheet, or switch to Manual Form.（请先上传表格文件，或切换到手动填表）");
+            return [];
+          }
+          if (src === "manual") {
+            const rows = readManualRows();
+            if (!rows.length) {
+              showWarning("Please add at least one valid row.（请至少添加一行有效数据）");
+              return [];
+            }
+            return rows;
+          }
+          return [];
+        }
+
+        function onSheetFile(ev) {
+          const f = ev.target.files && ev.target.files[0];
+          const status = document.getElementById("sheetStatus");
+          if (!f) {
+            status.textContent = "";
+            uploadedActivities = null;
+            return;
+          }
+          status.textContent = "Reading…（读取中…）";
+          const reader = new FileReader();
+          reader.onload = function (e) {
+            try {
+              const data = new Uint8Array(e.target.result);
+              const wb = XLSX.read(data, { type: "array" });
+              const ws = wb.Sheets[wb.SheetNames[0]];
+              const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+              uploadedActivities = P.parseMatrix(matrix);
+              if (uploadedActivities.length) {
+                status.textContent = "Loaded " + uploadedActivities.length + " activities (" + f.name + ").（已载入 " + uploadedActivities.length + " 道工序：" + f.name + "）";
+                showWarning("");
+              } else {
+                status.textContent = "";
+                uploadedActivities = null;
+                showWarning("No valid activities parsed. Check columns/header.（未能解析出有效工序，请检查列/表头）");
+              }
+            } catch (err) {
+              status.textContent = "";
+              uploadedActivities = null;
+              showWarning("Cannot read file. Please use xlsx/xls/csv.（无法读取该文件，请确认格式为 xlsx/xls/csv）");
+            }
+          };
+          reader.onerror = function () {
+            status.textContent = "";
+            showWarning("File read failed.（文件读取失败）");
+          };
+          reader.readAsArrayBuffer(f);
+        }
+
+        function predStr(a) {
+          if (!a.predecessors.length) return "—";
+          return a.predecessors.join(", ");
+        }
+
+        function renderStatsBar() {
+          const st = P.projStats(activities);
+          const cp = P.critPath(activities);
+          document.getElementById("statsBar").innerHTML = `
+            <div class="stat"><div class="label">Expected Duration（期望总工期）</div><div class="value">${st.projectDuration.toFixed(2)} d（天）</div></div>
+            <div class="stat"><div class="label">SD (Critical Path)（关键路径标准差）</div><div class="value">${st.sd.toFixed(2)} d（天）</div></div>
+            <div class="stat"><div class="label">Variance Sum（关键路径方差和）</div><div class="value">${st.totalVar.toFixed(3)}</div></div>
+            <div class="stat"><div class="label">#Critical Activities（关键工序数）</div><div class="value">${cp.sorted.length}</div></div>
+          `;
+        }
+
+        function renderOverview() {
+          const cp = P.critPath(activities);
+          const st = P.projStats(activities);
+          document.getElementById("view-overview").innerHTML = `
+            <div class="panel">
+              <h2>Critical Path（关键路径，按 ES 排序）</h2>
+              <div class="path-box">${esc(cp.pathStr)}</div>
+              <p style="margin:0.75rem 0 0;font-size:0.9rem;color:var(--muted)">
+                CP sum: <strong style="font-family:var(--mono)">${cp.dur.toFixed(2)}</strong> d（关键路径期望时长之和，天）；
+                Expected finish (max EF): <strong style="font-family:var(--mono)">${cp.proj.toFixed(2)}</strong> d（项目期望完工时间，天）。
+              </p>
+            </div>
+            <div class="panel">
+              <h2>Summary（摘要）</h2>
+              <p style="margin:0;font-size:0.92rem;color:var(--muted)">
+                Total <strong>${activities.length}</strong> activities（共 ${activities.length} 道工序）. SD on critical path is <strong>${st.sd.toFixed(
+                  2
+                )}</strong> d（关键路径标准差，天）.
+                See Statistics（统计分析） for ±1σ/±2σ reference and Probability（完工概率） for any target date.
+              </p>
+            </div>
+          `;
+        }
+
+        function renderTable(id, html) {
+          document.getElementById(id).innerHTML = `<div class="panel"><div class="table-wrap"><table>${html}</table></div></div>`;
+        }
+
+        function renderActivities() {
+          let h =
+            "<thead><tr><th>Code（代码）</th><th>Description（描述）</th><th>Normal Cost (BDT)（成本）</th><th>Immediate Predecessors（紧前）</th></tr></thead><tbody>";
+          for (const a of activities) {
+            h += `<tr><td class="num">${esc(a.code)}</td><td>${esc(a.description)}</td><td class="num">${a.normalCost}</td><td>${esc(
+              predStr(a)
+            )}</td></tr>`;
+          }
+          h += "</tbody>";
+          renderTable("view-activities", h);
+        }
+
+        function renderTimes() {
+          let h =
+            "<thead><tr><th>Code（代码）</th><th>Optimistic（乐观）</th><th>Most Likely（最可能）</th><th>Pessimistic（悲观）</th><th>Mean（期望）</th><th>Variance（方差）</th></tr></thead><tbody>";
+          for (const a of activities) {
+            h += `<tr><td class="num">${esc(a.code)}</td><td class="num">${a.optimistic.toFixed(1)}</td><td class="num">${a.mostLikely.toFixed(
+              1
+            )}</td><td class="num">${a.pessimistic.toFixed(1)}</td><td class="num">${a.meanTime.toFixed(2)}</td><td class="num">${a.variance.toFixed(
+              3
+            )}</td></tr>`;
+          }
+          h += "</tbody>";
+          renderTable("view-times", h);
+        }
+
+        function renderSchedule() {
+          let h =
+            "<thead><tr><th>Code（代码）</th><th>ES</th><th>EF</th><th>LS</th><th>LF</th><th>Slack（时差）</th><th>Critical（关键）</th></tr></thead><tbody>";
+          for (const a of activities) {
+            const cr = a.isCritical ? "Yes（是）" : "No（否）";
+            const cls = a.isCritical ? ' class="critical"' : "";
+            h += `<tr><td class="num">${esc(a.code)}</td><td class="num">${a.ES.toFixed(2)}</td><td class="num">${a.EF.toFixed(
+              2
+            )}</td><td class="num">${a.LS.toFixed(2)}</td><td class="num">${a.LF.toFixed(2)}</td><td class="num">${a.slack.toFixed(2)}</td><td${cls}>${cr}</td></tr>`;
+          }
+          h += "</tbody>";
+          renderTable("view-schedule", h);
+        }
+
+        function renderCritical() {
+          const cp = P.critPath(activities);
+          document.getElementById("view-critical").innerHTML = `
+            <div class="panel">
+              <h2>Critical Path（关键路径序列）</h2>
+              <div class="path-box">${esc(cp.pathStr)}</div>
+              <p style="margin-top:0.75rem;font-size:0.9rem;color:var(--muted)">
+                CP sum: <strong style="font-family:var(--mono)">${cp.dur.toFixed(2)}</strong> d（天）<br/>
+                Expected duration: <strong style="font-family:var(--mono)">${cp.proj.toFixed(2)}</strong> d（天）
+              </p>
+            </div>
+          `;
+        }
+
+        function renderStatsTable() {
+          const st = P.projStats(activities);
+          const pd = st.projectDuration;
+          const sd = st.sd;
+          const labels = ["Mean − 2σ（均值 − 2σ）", "Mean − σ（均值 − σ）", "Mean（均值）", "Mean + σ（均值 + σ）", "Mean + 2σ（均值 + 2σ）"];
+          const targets = [pd - 2 * sd, pd - sd, pd, pd + sd, pd + 2 * sd];
+          let rows = "";
+          for (let i = 0; i < 5; i++) {
+            const z = sd > 0 ? (targets[i] - pd) / sd : 0;
+            const prob = P.normalCdf(z) * 100;
+            rows += `<tr><td>${labels[i]}</td><td class="num">${targets[i].toFixed(2)}</td><td class="num">${z.toFixed(2)}</td><td class="num">${prob.toFixed(1)}%</td></tr>`;
+          }
+          document.getElementById("view-stats").innerHTML = `
+            <div class="panel">
+              <h2>Statistics（统计量）</h2>
+              <p style="margin:0 0 1rem;font-size:0.9rem;color:var(--muted)">
+                Expected finish: <strong style="font-family:var(--mono)">${pd.toFixed(2)}</strong> d（期望完工时间，天）；
+                SD: <strong style="font-family:var(--mono)">${sd.toFixed(2)}</strong> d（关键路径标准差，天）；
+                Variance sum: <strong style="font-family:var(--mono)">${st.totalVar.toFixed(3)}</strong>（关键路径方差和）
+              </p>
+              <div class="table-wrap"><table>
+                <thead><tr><th>Reference（参照）</th><th>Target (d)（目标天数）</th><th>Z</th><th>Completion Prob.（完工概率）</th></tr></thead>
+                <tbody>${rows}</tbody>
+              </table></div>
+            </div>
+          `;
+        }
+
+        function renderProb() {
+          const st = P.projStats(activities);
+          document.getElementById("view-prob").innerHTML = `
+            <div class="panel">
+              <h2>Completion Probability（指定目标工期的完工概率）</h2>
+              <p style="margin:0 0 0.75rem;font-size:0.88rem;color:var(--muted)">
+                Model uses critical-path variance sum: μ = ${st.projectDuration.toFixed(2)} d, σ = ${st.sd.toFixed(
+                  2
+                )} d.（使用关键路径方差和：期望工期 μ，标准差 σ，单位天）
+              </p>
+              <div class="prob-form">
+                <label>Target days (d)（目标天数）<input type="number" id="targetDays" step="0.01" placeholder="e.g.（例如） ${st.projectDuration.toFixed(2)}" /></label>
+                <button type="button" class="btn primary" id="calcProb">Calculate（计算）</button>
+              </div>
+              <div class="prob-result" id="probOut" style="display:none"></div>
+              <div class="table-wrap" style="margin-top:1rem">
+                <table>
+                  <thead><tr><th>Z</th><th>Approx. Prob.（近似概率）</th><th>Meaning（含义）</th></tr></thead>
+                  <tbody>
+                    <tr><td class="num">−3.0</td><td class="num">0.13%</td><td>Very low（极低）</td></tr>
+                    <tr><td class="num">−2.0</td><td class="num">2.28%</td><td>Low（偏低）</td></tr>
+                    <tr><td class="num">−1.0</td><td class="num">15.87%</td><td>Low（偏低）</td></tr>
+                    <tr><td class="num">0.0</td><td class="num">50.00%</td><td>Neutral（中性）</td></tr>
+                    <tr><td class="num">1.0</td><td class="num">84.13%</td><td>High（偏高）</td></tr>
+                    <tr><td class="num">2.0</td><td class="num">97.72%</td><td>Very high（高）</td></tr>
+                    <tr><td class="num">3.0</td><td class="num">99.87%</td><td>Extremely high（极高）</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          `;
+          document.getElementById("calcProb").onclick = function () {
+            const v = parseFloat(document.getElementById("targetDays").value);
+            const out = document.getElementById("probOut");
+            if (Number.isNaN(v)) {
+              out.style.display = "block";
+              out.innerHTML = "Enter a valid number.（请输入有效数字）";
+              return;
+            }
+            const z = st.sd > 0 ? (v - st.projectDuration) / st.sd : 0;
+            const p = P.normalCdf(z) * 100;
+            out.style.display = "block";
+            out.innerHTML = `
+              <div>目标时间：<strong>${v.toFixed(2)}</strong> 天 &nbsp;|&nbsp; 期望时间：<strong>${st.projectDuration.toFixed(
+                2
+              )}</strong> 天</div>
+              <div style="margin-top:0.35rem">Z = <strong>${z.toFixed(4)}</strong> &nbsp;→&nbsp; P(按期或提前) ≈ <strong>${p.toFixed(2)}%</strong></div>
+              <div style="margin-top:0.5rem;color:var(--muted)">${esc(P.interpretation(p))}</div>
+            `;
+          };
+        }
+
+        function renderNetwork() {
+          const order = P.topoOrder(activities);
+          let blocks = "";
+          for (const a of activities) {
+            const preds =
+              a.predecessors.length === 0
+                ? "Start（起点）"
+                : a.predecessors.map((c) => `<span class="num">${esc(c)}</span>`).join(" → ");
+            const tag = a.isCritical ? ' <span class="critical">[Critical（关键）]</span>' : "";
+            blocks += `<div class="network-item">
+              <div class="title">Activity ${esc(a.code)}（工序） — ${esc(a.description)}${tag}</div>
+              <div>Predecessors（紧前）：${preds} → <strong>${esc(a.code)}</strong></div>
+            </div>`;
+          }
+          document.getElementById("view-network").innerHTML = `
+            <div class="panel">
+              <h2>Dependencies（依赖关系）</h2>
+              ${blocks}
+              <div class="topo-line">Topological order（拓扑顺序）：${order.map((c) => esc(c)).join(" · ")}</div>
+            </div>
+          `;
+        }
+
+        function buildTabs() {
+          nav.innerHTML = tabsConfig
+            .map(
+              (t, i) =>
+                `<button type="button" class="tab${i === 0 ? " active" : ""}" role="tab" data-view="${t.id}" aria-selected="${i === 0}">${esc(
+                  t.label
+                )}</button>`
+            )
+            .join("");
+          nav.querySelectorAll(".tab").forEach((btn) => {
+            btn.addEventListener("click", function () {
+              const id = this.getAttribute("data-view");
+              nav.querySelectorAll(".tab").forEach((b) => {
+                b.classList.toggle("active", b === this);
+                b.setAttribute("aria-selected", b === this ? "true" : "false");
+              });
+              document.querySelectorAll("section.view").forEach((sec) => {
+                sec.classList.toggle("active", sec.id === "view-" + id);
+              });
+            });
+          });
+        }
+
+        function refresh() {
+          const raw = getSourceActivities();
+          activities = P.runPert(raw);
+          if (!activities.length) {
+            document.getElementById("statsBar").innerHTML = "";
+            document.getElementById("view-overview").innerHTML =
+              '<div class="panel"><p class="empty-hint">No valid activities yet. Upload a file or fill the form, then click Calculate.（暂无有效工序数据，请上传文件或手动填表后点击“计算”）</p></div>';
+            ["view-activities", "view-times", "view-schedule", "view-critical", "view-stats", "view-prob", "view-network"].forEach((id) => {
+              document.getElementById(id).innerHTML = "";
+            });
+            return;
+          }
+          renderStatsBar();
+          renderOverview();
+          renderActivities();
+          renderTimes();
+          renderSchedule();
+          renderCritical();
+          renderStatsTable();
+          renderProb();
+          renderNetwork();
+        }
+
+        document.querySelectorAll('input[name="src"]').forEach((r) => {
+          r.addEventListener("change", function () {
+            syncSourceBlocks();
+            if (this.value === "manual") {
+              const body = document.getElementById("manualBody");
+              if (!body.querySelector("tr")) {
+                addManualRow();
+                addManualRow();
+              }
+            }
+          });
+        });
+
+        document.getElementById("addRow").addEventListener("click", function () {
+          addManualRow();
+        });
+        document.getElementById("sheetFile").addEventListener("change", onSheetFile);
+
+        document.getElementById("recalc").addEventListener("click", refresh);
+
+        buildTabs();
+        syncSourceBlocks();
+        (function initManualRows() {
+          const body = document.getElementById("manualBody");
+          if (!body.querySelector("tr")) {
+            addManualRow();
+            addManualRow();
+          }
+        })();
+        refresh();
+      })();
+    </script>
+  </body>
+</html>
