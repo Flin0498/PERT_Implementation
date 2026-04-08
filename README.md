@@ -24,14 +24,12 @@ It contains:
 
 ### 2. Project Structure
 ```
-
 ├─ PERT model-2025.09.09.c
 ├─ PERT model-2025.09.09.xlsx   (example input) 
 ├─ index.html
 ├─ styles.css
 ├─ pert.js
 └─ xlsx.full.min.js
-
 ```
 
 ### 3. Offline Web UI (recommended)
@@ -90,7 +88,6 @@ Run:
 ├─ styles.css
 ├─ pert.js
 └─ xlsx.full.min.js
-
 ```
 
 ### 3. 离线网页端（推荐）
