@@ -8,7 +8,7 @@
 
 ---
 
-<h2 id="english">英文</h2>
+<h2 id="english">English</h2>
 
 ### 1. Abstract
 This project implements **PERT (Program Evaluation and Review Technique)** analysis:
@@ -24,22 +24,24 @@ It contains:
 
 ### 2. Project Structure
 ```
-Assignment 1/
+
 ├─ PERT model-2025.09.09.c
+├─ 
 ├─ PERT model-2025.09.09.xlsx   (example input)
+├─ 
 ├─ index.html
+├─ 
 ├─ styles.css
+├─ 
 ├─ pert.js
+├─ 
 └─ xlsx.full.min.js
-
-
-   
 
 ```
 
 ### 3. Offline Web UI (recommended)
 Open:
-- `pert-web/index.html`
+- `index.html`
 
 Input methods:
 - **Upload spreadsheet**: `.xlsx` / `.xls` / `.csv`
@@ -61,23 +63,13 @@ Notes:
 ### 4. C Program (CLI)
 Compile (MinGW-w64 example):
 ```bash
-gcc "1230019503_Liu Yukun_PERT model-2025.09.09.c" -o pert.exe
+gcc "PERT model-2025.09.09.c" -o pert.exe
 ```
 
 Run:
 ```bash
 ./pert.exe
 ```
-
-### 5. What to Commit to GitHub
-Recommended:
-- `*.c`
-- `pert-web/` (all files inside, including `xlsx.full.min.js`)
-- your input data file(s) like `*.xlsx` (optional)
-
-Do NOT commit (generated artifacts):
-- `build/`
-- `*.exe`, `*.o`, `*.obj`
 
 ---
 
@@ -97,19 +89,23 @@ Do NOT commit (generated artifacts):
 
 ### 2. 目录结构
 ```
-Assignment 1/
-├─ 1230019503_Liu Yukun_PERT model-2025.09.09.c
-├─ 1230019503_Liu Yukun_PERT model-2025.09.09.xlsx   （示例输入）
-└─ pert-web/
-   ├─ index.html
-   ├─ styles.css
-   ├─ pert.js
-   └─ xlsx.full.min.js
+├─ PERT model-2025.09.09.c
+├─ 
+├─ PERT model-2025.09.09.xlsx   (example input)
+├─ 
+├─ index.html
+├─ 
+├─ styles.css
+├─ 
+├─ pert.js
+├─ 
+└─ xlsx.full.min.js
+
 ```
 
 ### 3. 离线网页端（推荐）
 直接打开：
-- `pert-web/index.html`
+- `index.html`
 
 输入方式：
 - **上传表格**：`.xlsx` / `.xls` / `.csv`
@@ -131,21 +127,10 @@ Assignment 1/
 ### 4. C 程序（命令行）
 编译（以 MinGW-w64 为例）：
 ```bash
-gcc "1230019503_Liu Yukun_PERT model-2025.09.09.c" -o pert.exe
+gcc "PERT model-2025.09.09.c" -o pert.exe
 ```
 
 运行：
 ```bash
 ./pert.exe
 ```
-
-### 5. 上传 GitHub 建议
-建议上传：
-- `*.c`
-- `pert-web/`（包含 `xlsx.full.min.js`）
-- 你的输入数据文件（如 `*.xlsx`，可选）
-
-不建议上传（编译产物/自动生成）：
-- `build/`
-- `*.exe`、`*.o`、`*.obj`
-
