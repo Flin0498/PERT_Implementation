@@ -26,15 +26,10 @@ It contains:
 ```
 
 ├─ PERT model-2025.09.09.c
-├─ 
-├─ PERT model-2025.09.09.xlsx   (example input)
-├─ 
+├─ PERT model-2025.09.09.xlsx   (example input) 
 ├─ index.html
-├─ 
 ├─ styles.css
-├─ 
 ├─ pert.js
-├─ 
 └─ xlsx.full.min.js
 
 ```
@@ -90,15 +85,10 @@ Run:
 ### 2. 目录结构
 ```
 ├─ PERT model-2025.09.09.c
-├─ 
 ├─ PERT model-2025.09.09.xlsx   (example input)
-├─ 
 ├─ index.html
-├─ 
 ├─ styles.css
-├─ 
 ├─ pert.js
-├─ 
 └─ xlsx.full.min.js
 
 ```
